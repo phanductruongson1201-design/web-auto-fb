@@ -9,7 +9,7 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Giao diện HTML đã được thiết kế lại (CSS Mới)
+# GIỮ NGUYÊN 100% GIAO DIỆN PRO
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="vi">
@@ -132,6 +132,7 @@ HTML_TEMPLATE = """
             font-size: 14px;
             border-left: 5px solid transparent;
             font-weight: 500;
+            word-break: break-all;
         }
         .success { background-color: #ecfdf5; border-left-color: var(--success); color: #065f46; border-right: 1px solid #d1fae5; border-top: 1px solid #d1fae5; border-bottom: 1px solid #d1fae5;}
         .error { background-color: #fef2f2; border-left-color: var(--error); color: #991b1b; border-right: 1px solid #fee2e2; border-top: 1px solid #fee2e2; border-bottom: 1px solid #fee2e2;}
@@ -161,7 +162,7 @@ HTML_TEMPLATE = """
             
             <div class="form-group">
                 <label>Nội dung bài viết:</label>
-                <textarea name="message" required rows="6" placeholder="Nhập nội dung bạn muốn truyền tải đến các hội nhóm..."></textarea>
+                <textarea name="message" required rows="6" placeholder="Nhập nội dung bạn muốn truyền tải đến các hội nhóm/trang..."></textarea>
             </div>
             
             <div class="form-group">
@@ -178,7 +179,7 @@ HTML_TEMPLATE = """
                 <ul class="result-list">
                 {% for res in results %}
                     <li class="result-item {{ 'success' if '✅' in res.status else 'error' }}">
-                        <strong>ID Nhóm: {{ res.group }}</strong> <br> 
+                        <strong>ID Đích: {{ res.group }}</strong> <br> 
                         <span style="font-weight: 400; font-size: 13px; margin-top: 4px; display: inline-block;">Trạng thái: {{ res.status }}</span>
                     </li>
                 {% endfor %}
@@ -190,13 +191,29 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def extract_group_id(group_input):
-    group_str = str(group_input).strip()
-    if group_str.isdigit():
-        return group_str
-    match = re.search(r'groups/(\d+)', group_str)
-    if match:
-        return match.group(1)
+# THUẬT TOÁN NHẬN DIỆN MỚI
+def extract_target_id(input_str):
+    input_str = str(input_str).strip()
+    if input_str.isdigit():
+        return input_str
+    
+    # Lọc link chứa id= (VD: profile.php?id=1000...)
+    id_match = re.search(r'id=(\d+)', input_str)
+    if id_match:
+        return id_match.group(1)
+        
+    # Lọc link Group
+    group_match = re.search(r'groups/(\d+)', input_str)
+    if group_match:
+        return group_match.group(1)
+        
+    # Lọc link Fanpage tùy chỉnh (VD: /khonguyenlieutoolmmo)
+    vanity_match = re.search(r'facebook\.com/([^/?]+)', input_str)
+    if vanity_match:
+        name = vanity_match.group(1)
+        if name not in ['groups', 'profile.php', 'pages']:
+            return name
+            
     return None
 
 @app.route('/', methods=['GET', 'POST'])
@@ -221,33 +238,33 @@ def index():
 
             try:
                 df = pd.read_excel(filepath)
-                group_list = df.iloc[:, 0].dropna().tolist()
+                target_list = df.iloc[:, 0].dropna().tolist()
 
-                for item in group_list:
-                    group_id = extract_group_id(item)
-                    if not group_id:
-                        results.append({'group': item, 'status': '❌ Không trích xuất được ID từ Link'})
+                for item in target_list:
+                    target_id = extract_target_id(item)
+                    if not target_id:
+                        results.append({'group': item, 'status': '❌ Không bóc tách được ID từ Link'})
                         continue
 
                     if image_bytes:
-                        url = f"https://graph.facebook.com/v19.0/{group_id}/photos"
+                        url = f"https://graph.facebook.com/v19.0/{target_id}/photos"
                         payload = {'message': message, 'access_token': access_token}
                         files = {'source': (image_name, image_bytes, 'image/jpeg')}
                         response = requests.post(url, data=payload, files=files)
                     else:
-                        url = f"https://graph.facebook.com/v19.0/{group_id}/feed"
+                        url = f"https://graph.facebook.com/v19.0/{target_id}/feed"
                         payload = {'message': message, 'access_token': access_token}
                         response = requests.post(url, data=payload)
                     
                     try:
                         data = response.json()
                         if 'id' in data or 'post_id' in data:
-                            results.append({'group': group_id, 'status': f"✅ Đăng thành công (Mã bài: {data.get('post_id', data.get('id'))})"})
+                            results.append({'group': target_id, 'status': f"✅ Đăng thành công (Mã bài: {data.get('post_id', data.get('id'))})"})
                         else:
                             error_msg = data.get('error', {}).get('message', 'Lỗi không xác định')
-                            results.append({'group': group_id, 'status': f"❌ Bị từ chối: {error_msg}"})
+                            results.append({'group': target_id, 'status': f"❌ Bị từ chối: {error_msg}"})
                     except Exception as e:
-                        results.append({'group': group_id, 'status': f"❌ Lỗi kết nối máy chủ FB: {str(e)}"})
+                        results.append({'group': target_id, 'status': f"❌ Lỗi kết nối máy chủ FB: {str(e)}"})
                     
                     time.sleep(delay)
 
