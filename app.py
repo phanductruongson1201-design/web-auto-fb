@@ -6,7 +6,6 @@ import os
 import time
 
 app = Flask(__name__)
-# Tạo thư mục tạm để lưu file upload
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
@@ -26,17 +25,21 @@ HTML_TEMPLATE = """
         .result-box { margin-top: 20px; padding: 15px; border-radius: 4px; background-color: #e7f3ff; }
         .success { color: green; }
         .error { color: red; }
+        .optional { font-size: 12px; color: #666; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>Đăng bài Facebook Group Hàng Loạt (Excel)</h2>
+        <h2>Đăng bài Facebook Group Hàng Loạt</h2>
         <form method="POST" enctype="multipart/form-data">
             <label>Access Token (Bắt buộc):</label>
             <input type="text" name="access_token" required placeholder="Nhập mã token hợp lệ...">
             
             <label>Tải lên file Excel (.xlsx) chứa Link/ID Nhóm:</label>
             <input type="file" name="excel_file" accept=".xlsx, .xls" required>
+            
+            <label>Tải lên Hình ảnh minh họa <span class="optional">(Không bắt buộc)</span>:</label>
+            <input type="file" name="image_file" accept="image/*">
             
             <label>Nội dung bài viết:</label>
             <textarea name="message" required rows="5" placeholder="Nhập nội dung bạn muốn đăng..."></textarea>
@@ -80,16 +83,22 @@ def index():
         access_token = request.form['access_token']
         message = request.form['message']
         delay = int(request.form.get('delay', 5))
-        file = request.files['excel_file']
+        excel_file = request.files.get('excel_file')
+        image_file = request.files.get('image_file')
 
-        if file and file.filename != '':
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-            file.save(filepath)
+        # Đọc dữ liệu ảnh nếu người dùng có tải lên
+        image_bytes = None
+        image_name = None
+        if image_file and image_file.filename != '':
+            image_bytes = image_file.read()
+            image_name = image_file.filename
+
+        if excel_file and excel_file.filename != '':
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], excel_file.filename)
+            excel_file.save(filepath)
 
             try:
-                # Đọc file Excel, lấy dữ liệu từ cột đầu tiên
                 df = pd.read_excel(filepath)
-                # Giả định cột đầu tiên chứa link/ID
                 group_list = df.iloc[:, 0].dropna().tolist()
 
                 for item in group_list:
@@ -98,32 +107,33 @@ def index():
                         results.append({'group': item, 'status': '❌ Không trích xuất được ID'})
                         continue
 
-                    # Gọi Graph API
-                    url = f"https://graph.facebook.com/v19.0/{group_id}/feed"
-                    payload = {
-                        'message': message,
-                        'access_token': access_token
-                    }
+                    # Quyết định chọn Cổng đăng bài dựa trên việc có ảnh hay không
+                    if image_bytes:
+                        url = f"https://graph.facebook.com/v19.0/{group_id}/photos"
+                        payload = {'message': message, 'access_token': access_token}
+                        # Đóng gói file ảnh để gửi đi
+                        files = {'source': (image_name, image_bytes, 'image/jpeg')}
+                        response = requests.post(url, data=payload, files=files)
+                    else:
+                        url = f"https://graph.facebook.com/v19.0/{group_id}/feed"
+                        payload = {'message': message, 'access_token': access_token}
+                        response = requests.post(url, data=payload)
                     
                     try:
-                        response = requests.post(url, data=payload)
                         data = response.json()
-                        
-                        if 'id' in data:
-                            results.append({'group': group_id, 'status': f"✅ Thành công (ID: {data['id']})"})
+                        if 'id' in data or 'post_id' in data:
+                            results.append({'group': group_id, 'status': f"✅ Thành công"})
                         else:
                             error_msg = data.get('error', {}).get('message', 'Lỗi không xác định')
                             results.append({'group': group_id, 'status': f"❌ Bị từ chối: {error_msg}"})
                     except Exception as e:
                         results.append({'group': group_id, 'status': f"❌ Lỗi kết nối: {str(e)}"})
                     
-                    # Tạm dừng để tránh bị Facebook chặn do gọi API quá nhanh (Rate Limiting)
                     time.sleep(delay)
 
             except Exception as e:
-                results.append({'group': 'Hệ thống', 'status': f"❌ Lỗi đọc file Excel: {str(e)}"})
+                results.append({'group': 'Hệ thống', 'status': f"❌ Lỗi xử lý: {str(e)}"})
             finally:
-                # Xóa file tạm sau khi xử lý xong
                 if os.path.exists(filepath):
                     os.remove(filepath)
                 
