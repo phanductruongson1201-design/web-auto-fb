@@ -1,14 +1,15 @@
 from flask import Flask, request, render_template_string
 import requests
 import re
-import pandas as pd
 import os
 import time
+import openpyxl # Dùng thư viện siêu nhẹ thay cho pandas
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+# GIAO DIỆN GIỮ NGUYÊN 100%
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="vi">
@@ -44,7 +45,7 @@ HTML_TEMPLATE = """
     <div class="container">
         <div class="header">
             <h2>Hệ Thống Auto Đăng Bài Pro</h2>
-            <p>Trình tự động phân luồng Hội Nhóm & Fanpage (All-in-One)</p>
+            <p>Trình tự động phân luồng Hội Nhóm & Fanpage (Bản Tối Ưu Nhẹ)</p>
         </div>
         <form method="POST" enctype="multipart/form-data">
             <div class="form-group">
@@ -116,7 +117,6 @@ def index():
             image_bytes = image_file.read()
             image_name = image_file.filename
 
-        # TỰ ĐỘNG LẤY TẤT CẢ TOKEN CỦA CÁC TRANG BẠN QUẢN LÝ
         page_tokens = {}
         try:
             acc_url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={master_token}"
@@ -125,15 +125,22 @@ def index():
                 for page in acc_res['data']:
                     page_tokens[page['id']] = page['access_token']
         except:
-            pass # Lỗi lấy token trang thì bỏ qua, dùng token gốc
+            pass 
 
         if excel_file and excel_file.filename != '':
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], excel_file.filename)
             excel_file.save(filepath)
 
             try:
-                df = pd.read_excel(filepath)
-                target_list = df.iloc[:, 0].dropna().tolist()
+                # DÙNG OPENPYXL SIÊU NHẸ ĐỂ ĐỌC EXCEL (Chống tràn RAM)
+                wb = openpyxl.load_workbook(filepath, data_only=True)
+                sheet = wb.active
+                target_list = []
+                # Bỏ qua dòng tiêu đề (min_row=2), chỉ đọc cột A (min_col=1, max_col=1)
+                for row in sheet.iter_rows(min_row=2, min_col=1, max_col=1, values_only=True):
+                    if row[0]:
+                        target_list.append(str(row[0]))
+                wb.close()
 
                 for item in target_list:
                     raw_id = extract_target_id(item)
@@ -141,7 +148,6 @@ def index():
                         results.append({'group': item, 'status': '❌ Không bóc tách được ID'})
                         continue
 
-                    # Tự động dịch Link tên chữ (Vanity URL) thành ID Số nếu cần
                     target_id = raw_id
                     if not str(raw_id).isdigit():
                         try:
@@ -152,7 +158,6 @@ def index():
                         except:
                             pass
                     
-                    # QUYẾT ĐỊNH THÔNG MINH: Nếu mục tiêu là Fanpage, tự động lấy Token của Fanpage đó ra dùng. Nếu không có thì dùng Token gốc.
                     active_token = page_tokens.get(target_id, master_token)
 
                     if image_bytes:
