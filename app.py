@@ -12,7 +12,7 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # --- CẤU HÌNH FACEBOOK APP ---
 APP_ID = '385078767129314' # ID ứng dụng của bạn
-APP_SECRET = 'NHAP_KHOA_BI_MAT_CUA_BAN_VAO_DAY' # Bạn hãy dán App Secret vào giữa 2 dấu nháy đơn này
+APP_SECRET = 'f9d18c2c52c07ad7fede00f56243cfc6' # Bạn hãy dán App Secret vào giữa 2 dấu nháy đơn này
 REDIRECT_URI = 'https://he-thong-dang-bai.onrender.com/callback'
 # -----------------------------
 
