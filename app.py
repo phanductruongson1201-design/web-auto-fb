@@ -1,15 +1,21 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, redirect, url_for, session
 import requests
 import re
 import os
 import time
-import openpyxl # Dùng thư viện siêu nhẹ thay cho pandas
+import openpyxl
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24) # Khóa bảo mật để lưu phiên đăng nhập
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# GIAO DIỆN GIỮ NGUYÊN 100%
+# --- CẤU HÌNH FACEBOOK APP ---
+APP_ID = '385078767129314' # ID ứng dụng của bạn
+APP_SECRET = 'NHAP_KHOA_BI_MAT_CUA_BAN_VAO_DAY' # Bạn hãy dán App Secret vào giữa 2 dấu nháy đơn này
+REDIRECT_URI = 'https://he-thong-dang-bai.onrender.com/callback'
+# -----------------------------
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="vi">
@@ -45,44 +51,55 @@ HTML_TEMPLATE = """
     <div class="container">
         <div class="header">
             <h2>Hệ Thống Auto Đăng Bài Pro</h2>
-            <p>Trình tự động phân luồng Hội Nhóm & Fanpage (Bản Tối Ưu Nhẹ)</p>
+            <p>Trình phân luồng Hội Nhóm & Fanpage Tự Động</p>
         </div>
-        <form method="POST" enctype="multipart/form-data">
-            <div class="form-group">
-                <label>Mã Access Token Tổng (Bắt buộc):</label>
-                <input type="text" name="access_token" required placeholder="Nhập User Token chứa đủ quyền...">
+        
+        {% if not is_logged_in %}
+            <div style="text-align: center; margin-top: 40px; margin-bottom: 40px;">
+                <p style="margin-bottom: 20px; color: var(--text-muted); font-size: 15px;">Vui lòng kết nối với Facebook để hệ thống lấy quyền đăng bài tự động.</p>
+                <a href="{{ login_url }}" style="background-color: #1877f2; color: white; padding: 14px 24px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; display: inline-block; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(24, 119, 242, 0.3);">
+                    <svg viewBox="0 0 24 24" width="24" height="24" style="vertical-align: middle; margin-right: 8px; fill: white;"><path d="M23.9981 11.9991C23.9981 5.37216 18.626 0 11.9991 0C5.37216 0 0 5.37216 0 11.9991C0 17.9882 4.38789 22.9522 10.1242 23.8524V15.4676H7.07758V11.9991H10.1242V9.35553C10.1242 6.34826 11.9156 4.68714 14.6564 4.68714C15.9692 4.68714 17.3424 4.92149 17.3424 4.92149V7.87439H15.8294C14.3388 7.87439 13.8739 8.79933 13.8739 9.74824V11.9991H17.2018L16.6698 15.4676H13.8739V23.8524C19.6103 22.9522 23.9981 17.9882 23.9981 11.9991Z"/></svg>
+                    Đăng Nhập Bằng Facebook
+                </a>
             </div>
-            <div class="form-group">
-                <label>Tệp danh sách Excel chứa Link (.xlsx):</label>
-                <input type="file" name="excel_file" accept=".xlsx, .xls" required>
+        {% else %}
+            <div style="text-align: right; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px dashed var(--border-color);">
+                <span style="color: var(--success); font-weight: 600; font-size: 14px;">✅ Đã cấp quyền Facebook thành công</span>
+                <a href="/logout" style="margin-left: 10px; color: var(--error); text-decoration: none; font-size: 14px; font-weight: 500;">(Đăng xuất)</a>
             </div>
-            <div class="form-group">
-                <label>Hình ảnh đính kèm <span class="optional">(Không bắt buộc)</span>:</label>
-                <input type="file" name="image_file" accept="image/*">
-            </div>
-            <div class="form-group">
-                <label>Nội dung bài viết:</label>
-                <textarea name="message" required rows="5" placeholder="Nhập nội dung..."></textarea>
-            </div>
-            <div class="form-group">
-                <label>Khoảng nghỉ chống Spam (Giây):</label>
-                <input type="number" name="delay" value="5" min="1" required>
-            </div>
-            <button type="submit">Khởi Chạy Tiến Trình</button>
-        </form>
+            <form method="POST" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label>Tệp danh sách Excel chứa Link (.xlsx):</label>
+                    <input type="file" name="excel_file" accept=".xlsx, .xls" required>
+                </div>
+                <div class="form-group">
+                    <label>Hình ảnh đính kèm <span class="optional">(Không bắt buộc)</span>:</label>
+                    <input type="file" name="image_file" accept="image/*">
+                </div>
+                <div class="form-group">
+                    <label>Nội dung bài viết:</label>
+                    <textarea name="message" required rows="5" placeholder="Nhập nội dung..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Khoảng nghỉ chống Spam (Giây):</label>
+                    <input type="number" name="delay" value="5" min="1" required>
+                </div>
+                <button type="submit">Khởi Chạy Tiến Trình</button>
+            </form>
 
-        {% if results %}
-            <div class="result-box">
-                <h3>Bảng Báo Cáo Kết Quả</h3>
-                <ul class="result-list">
-                {% for res in results %}
-                    <li class="result-item {{ 'success' if '✅' in res.status else 'error' }}">
-                        <strong>Mục tiêu: {{ res.group }}</strong> <br> 
-                        <span style="font-weight: 400; font-size: 13px; margin-top: 4px; display: inline-block;">Trạng thái: {{ res.status }}</span>
-                    </li>
-                {% endfor %}
-                </ul>
-            </div>
+            {% if results %}
+                <div class="result-box">
+                    <h3>Bảng Báo Cáo Kết Quả</h3>
+                    <ul class="result-list">
+                    {% for res in results %}
+                        <li class="result-item {{ 'success' if '✅' in res.status else 'error' }}">
+                            <strong>Mục tiêu: {{ res.group }}</strong> <br> 
+                            <span style="font-weight: 400; font-size: 13px; margin-top: 4px; display: inline-block;">Trạng thái: {{ res.status }}</span>
+                        </li>
+                    {% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
         {% endif %}
     </div>
 </body>
@@ -102,11 +119,41 @@ def extract_target_id(input_str):
         if name not in ['groups', 'profile.php', 'pages']: return name
     return None
 
+# --- CÁC CỔNG GIAO TIẾP VỚI FACEBOOK ---
+@app.route('/callback')
+def callback():
+    code = request.args.get('code')
+    if not code:
+        return "Lỗi: Bạn đã hủy quá trình đăng nhập hoặc Facebook từ chối kết nối.", 400
+    
+    # Mang mã code đi đổi lấy Access Token
+    token_url = f"https://graph.facebook.com/v19.0/oauth/access_token?client_id={APP_ID}&redirect_uri={REDIRECT_URI}&client_secret={APP_SECRET}&code={code}"
+    response = requests.get(token_url).json()
+    
+    if 'access_token' in response:
+        # Lưu token vào két sắt (session)
+        session['fb_access_token'] = response['access_token']
+        return redirect(url_for('index'))
+    else:
+        return f"Lỗi không thể tạo mã Token: {response}", 400
+
+@app.route('/logout')
+def logout():
+    session.pop('fb_access_token', None)
+    return redirect(url_for('index'))
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    # Kiểm tra xem đã đăng nhập chưa
+    if 'fb_access_token' not in session:
+        scope = "publish_to_groups,pages_show_list,pages_read_engagement,pages_manage_posts"
+        login_url = f"https://www.facebook.com/v19.0/dialog/oauth?client_id={APP_ID}&redirect_uri={REDIRECT_URI}&scope={scope}"
+        return render_template_string(HTML_TEMPLATE, is_logged_in=False, login_url=login_url)
+
+    # Nếu đã đăng nhập, tiến hành chạy form
     results = []
     if request.method == 'POST':
-        master_token = request.form['access_token'].strip()
+        master_token = session['fb_access_token']
         message = request.form['message']
         delay = int(request.form.get('delay', 5))
         excel_file = request.files.get('excel_file')
@@ -132,11 +179,9 @@ def index():
             excel_file.save(filepath)
 
             try:
-                # DÙNG OPENPYXL SIÊU NHẸ ĐỂ ĐỌC EXCEL (Chống tràn RAM)
                 wb = openpyxl.load_workbook(filepath, data_only=True)
                 sheet = wb.active
                 target_list = []
-                # Bỏ qua dòng tiêu đề (min_row=2), chỉ đọc cột A (min_col=1, max_col=1)
                 for row in sheet.iter_rows(min_row=2, min_col=1, max_col=1, values_only=True):
                     if row[0]:
                         target_list.append(str(row[0]))
@@ -188,7 +233,7 @@ def index():
                 if os.path.exists(filepath):
                     os.remove(filepath)
                 
-    return render_template_string(HTML_TEMPLATE, results=results)
+    return render_template_string(HTML_TEMPLATE, is_logged_in=True, results=results)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
