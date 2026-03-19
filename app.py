@@ -6,14 +6,13 @@ import time
 import openpyxl
 
 app = Flask(__name__)
-# Đã sửa thành chìa khóa cố định để không bị văng đăng nhập sau 15 phút
 app.secret_key = 'he_thong_auto_cua_ngan_vip_2026' 
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # --- CẤU HÌNH FACEBOOK APP ---
 APP_ID = '385078767129314'
-APP_SECRET = 'f9d18c2c52c07ad7fede00f56243cfc6' # <-- DÁN KHÓA BÍ MẬT CỦA BẠN VÀO GIỮA 2 DẤU NHÁY ĐƠN
+APP_SECRET = 'f9d18c2c52c07ad7fede00f56243cfc6' # <-- DÁN KHÓA BÍ MẬT CỦA BẠN VÀO ĐÂY
 REDIRECT_URI = 'https://he-thong-dang-bai.onrender.com/callback'
 # -----------------------------
 
@@ -78,7 +77,11 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="form-group">
                     <label>Nội dung bài viết:</label>
-                    <textarea name="message" required rows="5" placeholder="Nhập nội dung..."></textarea>
+                    <textarea name="message" required rows="5" placeholder="Nhập nội dung bài viết..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Bình luận tự động <span class="optional">(Để trống nếu không muốn cmt)</span>:</label>
+                    <textarea name="auto_comment" rows="2" placeholder="Nhập nội dung cmt mở bát..."></textarea>
                 </div>
                 <div class="form-group">
                     <label>Khoảng nghỉ chống Spam (Giây):</label>
@@ -142,7 +145,6 @@ def logout():
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if 'fb_access_token' not in session:
-        # ĐÃ GỠ BỎ QUYỀN GROUP Ở ĐÂY ĐỂ VƯỢT QUA LỖI BẢO MẬT CỦA FACEBOOK
         scope = "pages_show_list,pages_read_engagement,pages_manage_posts"
         login_url = f"https://www.facebook.com/v19.0/dialog/oauth?client_id={APP_ID}&redirect_uri={REDIRECT_URI}&scope={scope}"
         return render_template_string(HTML_TEMPLATE, is_logged_in=False, login_url=login_url)
@@ -151,6 +153,7 @@ def index():
     if request.method == 'POST':
         master_token = session['fb_access_token']
         message = request.form['message']
+        auto_comment = request.form.get('auto_comment', '').strip()
         delay = int(request.form.get('delay', 5))
         excel_file = request.files.get('excel_file')
         
@@ -204,6 +207,7 @@ def index():
                     
                     active_token = page_tokens.get(target_id, master_token)
 
+                    # BƯỚC 1: ĐĂNG BÀI
                     if uploaded_images_data:
                         if len(uploaded_images_data) == 1:
                             url = f"https://graph.facebook.com/v19.0/{target_id}/photos"
@@ -239,10 +243,25 @@ def index():
                         payload = {'message': message, 'access_token': active_token}
                         response = requests.post(url, data=payload)
                     
+                    # BƯỚC 2: KIỂM TRA ĐĂNG BÀI VÀ THỰC HIỆN AUTO COMMENT
                     try:
                         data = response.json()
                         if 'id' in data or 'post_id' in data:
-                            results.append({'group': raw_id, 'status': f"✅ Đăng thành công (Mã: {data.get('post_id', data.get('id'))})"})
+                            published_id = data.get('post_id', data.get('id'))
+                            status_msg = f"✅ Đăng thành công (Mã: {published_id})"
+                            
+                            # Xử lý Cmt tự động nếu người dùng có nhập
+                            if auto_comment:
+                                cmt_url = f"https://graph.facebook.com/v19.0/{published_id}/comments"
+                                cmt_payload = {'message': auto_comment, 'access_token': active_token}
+                                cmt_res = requests.post(cmt_url, data=cmt_payload).json()
+                                
+                                if 'id' in cmt_res:
+                                    status_msg += " + 💬 Đã tự động cmt"
+                                else:
+                                    status_msg += f" + ⚠️ Lỗi cmt: {cmt_res.get('error', {}).get('message', 'Không rõ')}"
+                                    
+                            results.append({'group': raw_id, 'status': status_msg})
                         else:
                             error_msg = data.get('error', {}).get('message', 'Lỗi từ chối')
                             results.append({'group': raw_id, 'status': f"❌ Bị từ chối: {error_msg}"})
