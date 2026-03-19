@@ -6,7 +6,7 @@ import time
 import openpyxl
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24) # Khóa bảo mật để lưu phiên đăng nhập
+app.secret_key = 'he_thong_auto_cua_ngan_vip_2026' # Khóa bảo mật để lưu phiên đăng nhập
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
