@@ -50,7 +50,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="header">
-            <h2>Hệ Thống Auto Đăng Bài Pro</h2>
+            <h2>Hệ Thống Auto Đăng Bài Pro by Trường Sơn MKT</h2>
             <p>Trình tự động phân luồng Fanpage</p>
         </div>
         
